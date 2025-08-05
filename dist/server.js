@@ -52,7 +52,7 @@ const startKeyboard = telegraf_1.Markup.keyboard([
 ]).resize().oneTime();
 const mainCategories = telegraf_1.Markup.keyboard([
     ['📈 Доходы', '📉 Расходы'],
-    ['💸 Баланс']
+    ['💸 Баланс', '↩️ Назад']
 ]).resize().oneTime();
 const incomeCategoriesKeyboard = telegraf_1.Markup.keyboard([
     ['💰 Зарплата', '💻 Фриланс'],
@@ -78,15 +78,22 @@ const recordTransaction = new telegraf_1.Scenes.WizardScene(`recordTransactionSc
         ctx.wizard.state.transactionType = "income";
         const incomeResult = db.prepare(`SELECT SUM(amount) AS total FROM income WHERE user_id=?`).get(userId);
         const totalIncome = incomeResult.total || 0;
-        await ctx.reply(`💰 Ваш общий доход: ${totalIncome.toFixed(2)}. \nВыберете категорию дохода: `, incomeCategoriesKeyboard);
+        const formattedTotalIncome = totalIncome.toLocaleString(`ru-RU`, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        await ctx.reply(`💰 Ваш общий доход: ${formattedTotalIncome} UAH. \nВыберете категорию дохода: `, incomeCategoriesKeyboard);
         return ctx.wizard.next();
     }
     else if (type === '📉 Расходы') {
         ctx.wizard.state.transactionType = "expense";
         const expenseResult = db.prepare(`SELECT SUM(amount) AS total FROM expense WHERE user_id=?`).get(userId);
         const totalExpense = expenseResult.total || 0;
-        await ctx.reply(`💰 Ваш общий доход: ${totalExpense.toFixed(2)}. \nВыберете категорию дохода: `, expenseCategoriesKeyboard);
+        const formattedTotalExpense = totalExpense.toLocaleString(`ru-RU`, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        await ctx.reply(`💰 Ваш общие расходы: ${formattedTotalExpense} UAH. \nВыберете категорию дохода: `, expenseCategoriesKeyboard);
         return ctx.wizard.next();
+    }
+    else if (type === '↩️ Назад') {
+        await ctx.reply(`Возвращаемся назад.`);
+        await ctx.reply(`Что делаем?`, startKeyboard);
+        return ctx.scene.leave();
     }
 }, async (ctx) => {
     const incomeCategories = ['💰 Зарплата', '💻 Фриланс', '📈 Инвестиции', '🎁 Подарки', '➕ Другое'];
@@ -102,12 +109,23 @@ const recordTransaction = new telegraf_1.Scenes.WizardScene(`recordTransactionSc
     else if (isExpenseCategory) {
         ctx.wizard.state.transactionCategory = inputCategory;
         await ctx.reply(`Введите сумму операции: `);
+        console.log(`------ пизда здесь-----`);
         return ctx.wizard.next();
     }
+    else if (inputCategory === '↩️ Назад') {
+        await ctx.reply(`Что будем записывать?`, mainCategories);
+        return ctx.wizard.selectStep(1);
+    }
 }, async (ctx) => {
+    console.log(`---- и вот тут -----`);
     const amountText = ctx.message?.text;
     const userId = ctx.from.id;
     const date = new Date().toISOString().slice(0, 10);
+    console.log(`------- тут -------`);
+    if (amountText === '↩️ Назад') {
+        await ctx.reply(`Возвразаемся назад.`);
+        return ctx.wizard.selectStep(2);
+    }
     if (!amountText) {
         await ctx.reply('Мы не можем обработать пустое поле. Введите сумму Вашей транзакции: ');
         return;
@@ -119,14 +137,15 @@ const recordTransaction = new telegraf_1.Scenes.WizardScene(`recordTransactionSc
     }
     const transactionType = ctx.wizard.state.transactionType;
     const transactionCategory = ctx.wizard.state.transactionCategory;
+    const formattedAmount = amount.toLocaleString(`ru-Ru`, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     if (transactionType === "income") {
         insertIncomeStmt.run(userId, amount, transactionCategory, date);
-        await ctx.reply(`✅ Операция записана в Категорию: ${transactionCategory} \nСумма: ${amount.toFixed(2)} UAH. `);
+        await ctx.reply(`✅ Операция записана в Категорию: ${transactionCategory} \nСумма: ${formattedAmount} UAH. `);
         await ctx.reply('Хотите записать еще? Тогда выберете категорию, пожалуйста: ', incomeCategoriesKeyboard);
     }
     else if (transactionType === "expense") {
         insertExpenseStmt.run(userId, amount, transactionCategory, date);
-        await ctx.reply(`✅ Операция записана в Категорию: ${transactionCategory} \nСумма: ${amount.toFixed(2)} UAH. `);
+        await ctx.reply(`✅ Операция записана в Категорию: ${transactionCategory} \nСумма: ${formattedAmount} UAH. `);
         await ctx.reply('Хотите записать еще? Тогда выберете категорию, пожалуйста: ', expenseCategoriesKeyboard);
     }
     delete ctx.wizard.state.transactionCategory;
@@ -137,12 +156,12 @@ const calculateTransaction = new telegraf_1.Scenes.WizardScene(`calculationScene
     await ctx.reply(`Какую категорию будем смотреть?`, mainCategories);
     return ctx.wizard.next();
 }, async (ctx) => {
-    const type = ctx.message.text; //['📈 Доходы', '📉 Расходы'],
+    const type = ctx.message.text;
     if (type === '📈 Доходы') {
         ctx.wizard.state.transactionType = 'income';
     }
     else if (type === '📉 Расходы') {
-        ctx.wizard.statr.transactionType = 'expense';
+        ctx.wizard.state.transactionType = 'expense';
     }
     else if (type === '↩️ Назад') {
         await ctx.reply('Что будем записывать ?', startKeyboard);
@@ -163,7 +182,7 @@ const calculateTransaction = new telegraf_1.Scenes.WizardScene(`calculationScene
     }
     if (dateOrPeriodInput === '↩️ Назад') {
         await ctx.reply('Что будем записывать?', startKeyboard);
-        return ctx.scene.leave();
+        return ctx.wizard.selectStep(1);
     }
     const date = /^\d{4}-\d{2}-\d{2}$/;
     const period = /^\d{4}-\d{2}-\d{2}\/\d{4}-\d{2}-\d{2}$/;
@@ -216,28 +235,37 @@ bot.hears('💸 Баланс', async (ctx) => {
     const userId = ctx.from.id;
     const incomeResult = db.prepare(`SELECT SUM(amount) AS total FROM income WHERE user_id=?`).get(userId);
     const totalIncome = incomeResult.total || 0;
+    const formattedTotalIncome = totalIncome.toLocaleString(`ru-RU`, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const expenseResult = db.prepare(`SELECT SUM(amount) AS total FROM expense WHERE user_id=?`).get(userId);
     const totalExpense = expenseResult.total || 0;
+    const formattedTotalExpense = totalExpense.toLocaleString(`ru-RU`, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const currentBalance = totalIncome - totalExpense;
+    const formattedCurrentBalance = currentBalance.toLocaleString(`ru-RU`, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     let message = `💰 Ваш текущий баланс:\n`;
-    message += `Доходы: ${totalIncome.toFixed(2)} UAH\n`;
-    message += `Расходы: -${totalExpense.toFixed(2)} UAH\n`;
+    message += `Доходы: ${formattedTotalIncome} UAH\n`;
+    message += `Расходы: -${formattedTotalExpense} UAH\n`;
     message += `-----------------------------------------\n`;
-    message += `Текущий баланс: ${currentBalance} UAH.`;
+    message += `Текущий баланс: ${formattedCurrentBalance} UAH.`;
     ctx.reply(message);
-    await ctx.reply(`Что будем записывать?`, mainCategories);
+    await ctx.reply(`Что будем делать?`, startKeyboard);
 });
 const handleClickCancel = async (ctx) => {
     if (ctx.scene.current) {
-        await ctx.reply("Действие успешно отменено.");
-        delete ctx.wizard.state;
-        return ctx.scene.leave();
+        const stepNumber = ctx.wizard.cursor;
+        if (stepNumber > 0) {
+            await ctx.reply(`🔙 Возвращаемся назад.`);
+            return ctx.wizard.back();
+        }
+        else {
+            await ctx.reply(`↩️ Действие успешно отменено.`, startKeyboard);
+            return ctx.scene.leave();
+        }
     }
     else {
         await ctx.reply('В данный момент нет активных операций.');
         delete ctx.session.transactionCategory;
         delete ctx.session.transactionType;
-        await ctx.reply(`Что будем записывать ?`, mainCategories);
+        await ctx.reply(`Что будем %%% ?`, startKeyboard);
     }
 };
 bot.hears('↩️ Назад', handleClickCancel);
